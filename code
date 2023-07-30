@@ -135,5 +135,3 @@ plt.legend(loc='best',frameon=False,prop={'size': 16},ncol=2)
 
 plt.tight_layout()
 plt.show()
-
-  End 
