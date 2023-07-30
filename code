@@ -1,0 +1,139 @@
+import pandas as pd
+import matplotlib.cm as cm
+from matplotlib import pyplot as plt
+import seaborn as sns
+import numpy as np
+
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import silhouette_samples, silhouette_score
+from sklearn.cluster import KMeans
+from sklearn import datasets, decomposition
+from sklearn.manifold import TSNE
+from rdkit.Chem import AllChem, MACCSkeys, Descriptors, Descriptors3D, Draw, rdMolDescriptors, Draw, PandasTools
+from rdkit.DataManip.Metric.rdMetricMatrixCalc import GetTanimotoSimMat, GetTanimotoDistMat
+from rdkit.Chem.Draw import IPythonConsole
+
+mols=Chem.SDMolSupplier('NFKB-CA-Regulators.sdf')
+
+bar=progressbar.ProgressBar(max_value=len(mols))
+table=pd.DataFrame()
+for i,mol in enumerate(mols):
+    Chem.SanitizeMol(mol)
+    table.loc[i,'smiles']=Chem.MolToSmiles(mol)
+    table.loc[i,'Mol']=mol
+    table.loc[i,'MolWt']=Descriptors.MolWt(mol)
+    table.loc[i,'LogP']=Descriptors.MolLogP(mol)
+    table.loc[i,'NumHAcceptors']=Descriptors.NumHAcceptors(mol)
+    table.loc[i,'NumHDonors']=Descriptors.NumHDonors(mol)
+    table.loc[i,'NumHeteroatoms']=Descriptors.NumHeteroatoms(mol)
+    table.loc[i,'NumRotatableBonds']=Descriptors.NumRotatableBonds(mol)
+    table.loc[i,'NumHeavyAtoms']=Descriptors.HeavyAtomCount (mol)
+    table.loc[i,'NumAliphaticCarbocycles']=Descriptors.NumAliphaticCarbocycles(mol)
+    table.loc[i,'NumAliphaticHeterocycles']=Descriptors.NumAliphaticHeterocycles(mol)
+    table.loc[i,'NumAliphaticRings']=Descriptors.NumAliphaticRings(mol)
+    table.loc[i,'NumAromaticCarbocycles']=Descriptors.NumAromaticCarbocycles(mol)
+    table.loc[i,'NumAromaticHeterocycles']=Descriptors.NumAromaticHeterocycles(mol)
+    table.loc[i,'NumAromaticRings']=Descriptors.NumAromaticRings(mol)
+    table.loc[i,'RingCount']=Descriptors.RingCount(mol)
+    table.loc[i,'FractionCSP3']=Descriptors.FractionCSP3(mol)
+    
+    table.loc[i,'TPSA']=Descriptors.TPSA(mol)
+    table.loc[i,'NPR1']=rdMolDescriptors.CalcNPR1(mol)
+    table.loc[i,'NPR2']=rdMolDescriptors.CalcNPR2(mol)
+    table.loc[i,'InertialShapeFactor']=Descriptors3D.InertialShapeFactor(mol)
+    table.loc[i,'RadiusOfGyration']=Descriptors3D.RadiusOfGyration(mol)
+    bar.update(i+1)
+
+descriptors = table[['MolWt', 'LogP','NumHeteroatoms','RingCount','FractionCSP3', 'TPSA','RadiusOfGyration']].values #The non-redundant molecular descriptors chosen for PCA
+descriptors_std = StandardScaler().fit_transform(descriptors) #Important to avoid scaling problems between our different descriptors
+pca = PCA()
+descriptors_2d = pca.fit_transform(descriptors_std)
+descriptors_pca= pd.DataFrame(descriptors_2d) # Saving PCA values to a new table
+descriptors_pca.index = table.index
+descriptors_pca.columns = ['PC{}'.format(i+1) for i in descriptors_pca.columns]
+descriptors_pca.head(5) #Displays the PCA table
+scale1 = 1.0/(max(descriptors_pca['PC1']) - min(descriptors_pca['PC1'])) 
+scale2 = 1.0/(max(descriptors_pca['PC2']) - min(descriptors_pca['PC2']))
+
+# And we add the new values to our PCA table
+descriptors_pca['PC1_normalized']=[i*scale1 for i in descriptors_pca['PC1']]
+descriptors_pca['PC2_normalized']=[i*scale2 for i in descriptors_pca['PC2']]
+
+smiles = list(table["smiles"])
+smi=[Chem.MolFromSmiles(x) for x in smiles]
+fps =  [MACCSkeys.GenMACCSKeys(x) for x in smi] # In this example I'll use MACCSKeys
+tanimoto_sim_mat_lower_triangle=GetTanimotoSimMat(fps) #This compute a similartity matrix between all the molecules
+n_mol = len(fps)
+similarity_matrix = np.ones([n_mol,n_mol])
+i_lower= np.tril_indices(n=n_mol,m=n_mol,k=-1)
+i_upper= np.triu_indices(n=n_mol,m=n_mol,k=1)
+similarity_matrix[i_lower] = tanimoto_sim_mat_lower_triangle
+similarity_matrix[i_upper] = similarity_matrix.T[i_upper] 
+distance_matrix = np.subtract(1,similarity_matrix)
+
+SNE_sim = TSNE(n_components=2,init='pca',random_state=90, angle = 0.3,perplexity=50).fit_transform(distance_matrix) #Remember to always tune the parameters acording your dataset!!
+tsne_result = pd.DataFrame(data = TSNE_sim , columns=["TC1","TC2"]) # New table containing the tSNE results
+tsne_result.head(5)
+
+plt.rcParams['axes.linewidth'] = 1.5
+fig, ax = plt.subplots(figsize=(6,6))
+
+ax=sns.scatterplot(x='TC1',y='TC2',data=tsne_result,s=15,linewidth=0.2,alpha=1)
+        
+
+plt.xlabel ('tSNE 1',fontsize=24,fontweight='bold')
+
+plt.ylabel ('tSNE 2',fontsize=24,fontweight='bold')
+
+plt.tick_params ('both',width=2,labelsize=18)
+
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+handles, labels = ax.get_legend_handles_labels()
+
+#ax.legend(handles=handles[1:], labels=labels[1:])
+
+#plt.legend(loc='lower right',frameon=False,prop={'size': 22},ncol=1)
+
+plt.tight_layout()
+plt.show()
+
+range_n_clusters = [2, 3, 4, 5, 6, 7, 8, 9, 10] # To explore the "best" number of cluster to clasify our molecules
+for n_clusters in range_n_clusters:
+    kmeans = KMeans(n_clusters=n_clusters, random_state=10)
+    cluster_labels = kmeans.fit_predict(tsne_result[['TC1','TC2']])
+    silhouette_avg = silhouette_score(tsne_result[['TC1','TC1']], cluster_labels)
+    print("For n_clusters =", n_clusters,
+          "The average silhouette_score is :", silhouette_avg)
+kmeans = KMeans(n_clusters=7, random_state=10) # We define the best number of clusters (6)
+clusters = kmeans.fit(tsne_result[['TC1','TC2']]) #TC1vs TC2
+
+tsne_result['Cluster'] = pd.Series(clusters.labels_, index=tsne_result.index)
+tsne_result.tail(5)
+
+plt.rcParams['axes.linewidth'] = 1.5
+fig, ax = plt.subplots(figsize=(6,6))
+
+ax=sns.scatterplot(x='TC1',y='TC2',data=tsne_result, hue='Cluster',s=22,palette=sns.color_palette("Set2", 7),linewidth=0.2,alpha=1)
+        
+
+plt.xlabel ('tSNE 1',fontsize=24,fontweight='bold')
+
+plt.ylabel ('tSNE 2',fontsize=24,fontweight='bold')
+
+plt.tick_params ('both',width=2,labelsize=18)
+
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+
+handles, labels = ax.get_legend_handles_labels()
+
+ax.legend(handles=handles[1:], labels=labels[1:])
+
+plt.legend(loc='best',frameon=False,prop={'size': 16},ncol=2)
+
+plt.tight_layout()
+plt.show()
+
+  End 
