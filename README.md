@@ -1,0 +1,2 @@
+# Code-for-t-SNE-analysis
+The t-SNE analysis carried out in this study was inspired by the work of Ruiz-Moreno, Angel J., et al. in their publication "In silico design and selection of new tetrahydroisoquinoline-based CD44 antagonist candidates." We utilized a modified version of their code, tailored to suit the specific requirements of our study. The adapted code used for t-SNE based cluster analysis is provided below.
